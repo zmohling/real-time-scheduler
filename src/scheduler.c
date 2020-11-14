@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
     printf("Task %d\nComp Time: %d\nPeriod: %d\nDeadline: %d\n", tasks[i]->id,
            tasks[i]->comp_time, tasks[i]->period, tasks[i]->deadline);
   }
-
+  
   exit(0);
 }
 
@@ -230,6 +230,9 @@ uint32_t find_lcm(task_t **tasks, uint8_t num_tasks) {
 } 
 
 int ms(task_t **tasks, uint8_t num_tasks, task_t ***schedule, uint32_t *schedule_len, uint8_t is_dms) {
+    if (is_dms) qsort(tasks, num_tasks, sizeof(task_t *), d_comparator);
+    else qsort(tasks, num_tasks, sizeof(task_t *), p_comparator);
+
     if (exact_analysis(tasks, num_tasks, 0) == 1) return 1;
 
     current_task_state_t task_state[num_tasks];
