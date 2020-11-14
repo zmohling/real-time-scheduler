@@ -1,35 +1,43 @@
 #include "scheduler.h"
 
+#include <math.h>
+#include <stdlib.h>
+#include <stdio.h>
+
 int main(int argc, char *argv[]) {
     task_t *list[3];
     list[0] = malloc(sizeof(task_t));
     list[1] = malloc(sizeof(task_t));
     list[2] = malloc(sizeof(task_t));
-    list[0]->comp_time = 20;
-    list[0]->deadline = 100;
-    list[0]->period = 100;
-    list[1]->comp_time = 30;
-    list[1]->deadline = 145;
-    list[1]->period = 145;
-    list[2]->comp_time = 68;
-    list[2]->deadline = 150;
-    list[2]->period = 150;
+    list[0]->comp_time = 3;
+    list[0]->deadline = 12;
+    list[0]->period = 12;
+    list[1]->comp_time = 3;
+    list[1]->deadline = 12;
+    list[1]->period = 12;
+    list[2]->comp_time = 8;
+    list[2]->deadline = 16;
+    list[2]->period = 16;
     
-    qsort(list, 3, sizeof(task_t *), d_comparator);
+    qsort(list, 3, sizeof(task_t *), p_comparator);
 
     uint32_t *returnSize = malloc(4);
-    task_t **schedule;
+    task_t ***schedule = malloc(sizeof(task_t **));
 
-    int rms_results = rms(list, 3, schedule, returnSize);
-    
+    int ms_results = ms(list, 3, schedule, returnSize, 0);
+    int edf_results = edf(list, 3, schedule, returnSize);
     for (int i = 0; i < *returnSize; i++) {
-        if (schedule[i] == NULL) printf("-\n");
-        for (int j = 0; j < 3; j++) {
-            if (schedule[i] == list[j]) printf("%d\n", j+1);
+        if (i % 10 == 0) printf("\n");
+        if (schedule[0][i] == NULL) printf("- ");
+        else {
+            for (int j = 0; j < 3; j++) {
+                if (schedule[0][i] == list[j]) printf("%d ", j+1);
+            }
         }
     }
+    printf("\n");
 
-    return rms_results;
+    return edf_results;
 }
 
 /*
@@ -109,33 +117,102 @@ uint32_t find_lcm(task_t **tasks, uint8_t num_tasks) {
     }
 
     return lcm;
-}
+} 
 
-int rms(task_t **tasks, uint8_t num_tasks, task_t **schedule, uint32_t *schedule_len) {
+int ms(task_t **tasks, uint8_t num_tasks, task_t ***schedule, uint32_t *schedule_len, uint8_t is_dms) {
     if (exact_analysis(tasks, num_tasks, 0) == 1) return 1;
 
-    *schedule_len = find_lcm(tasks, num_tasks);
-    schedule = malloc(sizeof(task_t *) * (*schedule_len));
-    uint8_t occupied_spots[*schedule_len] = { 0 };
+    current_task_state_t task_state[num_tasks];
     int i = 0;
+    *schedule_len = find_lcm(tasks, num_tasks);
+    schedule[0] = malloc(sizeof(task_t *) * (*schedule_len));
 
-    for (; i < num_tasks; i++) {
-        int j = 0;
-        for (; j < *schedule_len; j++) {
-            int k = j;
-            int comp_time_left = tasks[i]->comp_time;
-
-            while (comp_time_left > 0) {
-                printf("hello\n");
-                if (occupied_spots[k] == 0) {
-                    occupied_spots[k] = 1;
-                    schedule[k] = tasks[i];
-                    comp_time_left--;
-                }
-            }
-            j += tasks[i]->period;
+    if (is_dms) {
+        for (; i < num_tasks; i++) {
+            task_state[i].priority = tasks[i]->deadline;
+            //task_state[i].comp_time_left = tasks[i]->comp_time;
+        }
+    } else {
+        for (; i < num_tasks; i++) {
+            task_state[i].priority = tasks[i]->period;
+            //task_state[i].comp_time_left = tasks[i]->comp_time;
         }
     }
 
+    for (i = 0; i < (*schedule_len); i++) {
+        int j = 0;
+        int highest_schedulable_priority = -1;
+        task_t *highest_priority_task = NULL;
+        int task_index = -1;
+
+        for (; j < num_tasks; j++) {
+            //check if new period to reset comp time
+            if (i % tasks[j]->period == 0) {
+                task_state[j].comp_time_left = tasks[j]->comp_time;
+            }
+    
+            //find highest priority task that still has comp time
+            if ((task_state[j].priority < highest_schedulable_priority || 
+                highest_schedulable_priority == -1) && 
+                task_state[j].comp_time_left > 0) {
+                    highest_schedulable_priority = task_state[j].priority;
+                    highest_priority_task = tasks[j];
+                    task_index = j;
+            }
+        }
+
+        schedule[0][i] = highest_priority_task;
+        if (task_index != -1) task_state[task_index].comp_time_left--;
+        //printf("Task: %d, Time Left: %d\n", task_index, task_state[task_index].comp_time_left);
+    }
+
+    return 0;
+}
+
+int utilization_test(task_t **tasks, uint8_t num_tasks) {
+    int i = 0;
+    double utilization_sum = 0;
+    for (; i < num_tasks; i++) {
+        utilization_sum += tasks[i]->comp_time / tasks[i]->period;
+    }
+
+    if (utilization_sum > 1) return 1;
+    return 0;
+}
+
+int edf(task_t **tasks, uint8_t num_tasks, task_t ***schedule, uint32_t *schedule_len) {
+    if (utilization_test(tasks, num_tasks) == 1) return 1;
+
+    current_task_state_t task_state[num_tasks];
+    int i = 0;
+    *schedule_len = find_lcm(tasks, num_tasks);
+    schedule[0] = malloc(sizeof(task_t *) * (*schedule_len));
+
+    for (; i < (*schedule_len); i++) {
+        int j = 0;
+        int highest_schedulable_priority = -1;
+        task_t *highest_priority_task = NULL;
+        int task_index = -1;
+
+        for (; j < num_tasks; j++) {
+            //check if new period to reset comp time
+            if (i % tasks[j]->period == 0) {
+                task_state[j].comp_time_left = tasks[j]->comp_time;
+                task_state[j].priority = tasks[j]->period + i;
+            }
+    
+            //find highest priority task that still has comp time
+            if ((task_state[j].priority < highest_schedulable_priority || 
+                highest_schedulable_priority == -1) && 
+                task_state[j].comp_time_left > 0) {
+                    highest_schedulable_priority = task_state[j].priority;
+                    highest_priority_task = tasks[j];
+                    task_index = j;
+            }
+        }
+
+        schedule[0][i] = highest_priority_task;
+        if (task_index != -1) task_state[task_index].comp_time_left--;        
+    }
     return 0;
 }
