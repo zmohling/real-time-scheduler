@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <getopt.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,22 +94,31 @@ int main(int argc, char **argv) {
 
   char *a = strupper(algorithm);
   if (strcmp(a, "RMS") == 0) {
+    ms(tasks, num_tasks, &schedule, &schedule_len, 0);
   } else if (strcmp(a, "LLF") == 0) {
+    llf(tasks, num_tasks, &schedule, &schedule_len);
   } else if (strcmp(a, "EDF") == 0) {
+    edf(tasks, num_tasks, &schedule, &schedule_len);
   } else if (strcmp(a, "DMS") == 0) {
+    ms(tasks, num_tasks, &schedule, &schedule_len, 1);
   } else {
     printf("%s algorithm unrecognized\n", a);
     print_usage();
   }
 
-  /*
-  printf("Num tasks: %d\n", num_tasks);
-
-  for (int i = 0; i < num_tasks; i++) {
-    printf("Task %d\nComp Time: %d\nPeriod: %d\nDeadline: %d\n", tasks[i]->id,
-           tasks[i]->comp_time, tasks[i]->period, tasks[i]->deadline);
+  FILE *output_file;
+  if (output_file_path != NULL) {
+    output_file = fopen(output_file_path, "w+");
   }
-  */
+
+  FILE *out_file = (output_file_path) ? output_file : stdout;
+  for (int i = 0; i < schedule_len; i++) {
+    if (schedule[i]) {
+      fprintf(out_file, "%.2d: Task %d\n", i + 1, schedule[i]->id);
+    } else {
+      fprintf(out_file, "%d: -\n", i + 1);
+    }
+  }
 
   exit(0);
 }
@@ -254,4 +264,151 @@ uint32_t find_lcm(task_t **tasks, uint8_t num_tasks) {
   }
 
   return lcm;
+}
+
+int ms(task_t **tasks, uint8_t num_tasks, task_t ***schedule,
+       uint32_t *schedule_len, uint8_t is_dms) {
+  if (is_dms)
+    qsort(tasks, num_tasks, sizeof(task_t *), d_comparator);
+  else
+    qsort(tasks, num_tasks, sizeof(task_t *), p_comparator);
+
+  if (exact_analysis(tasks, num_tasks, 0) == 1) return 1;
+
+  current_task_state_t task_state[num_tasks];
+  int i = 0;
+  *schedule_len = find_lcm(tasks, num_tasks);
+  schedule[0] = malloc(sizeof(task_t *) * (*schedule_len));
+
+  if (is_dms) {
+    for (; i < num_tasks; i++) {
+      task_state[i].priority = tasks[i]->deadline;
+      // task_state[i].comp_time_left = tasks[i]->comp_time;
+    }
+  } else {
+    for (; i < num_tasks; i++) {
+      task_state[i].priority = tasks[i]->period;
+      // task_state[i].comp_time_left = tasks[i]->comp_time;
+    }
+  }
+
+  for (i = 0; i < (*schedule_len); i++) {
+    int j = 0;
+    int highest_schedulable_priority = -1;
+    task_t *highest_priority_task = NULL;
+    int task_index = -1;
+
+    for (; j < num_tasks; j++) {
+      // check if new period to reset comp time
+      if (i % tasks[j]->period == 0) {
+        task_state[j].comp_time_left = tasks[j]->comp_time;
+      }
+
+      // find highest priority task that still has comp time
+      if ((task_state[j].priority < highest_schedulable_priority ||
+           highest_schedulable_priority == -1) &&
+          task_state[j].comp_time_left > 0) {
+        highest_schedulable_priority = task_state[j].priority;
+        highest_priority_task = tasks[j];
+        task_index = j;
+      }
+    }
+
+    schedule[0][i] = highest_priority_task;
+    if (task_index != -1) task_state[task_index].comp_time_left--;
+    // printf("Task: %d, Time Left: %d\n", task_index,
+    // task_state[task_index].comp_time_left);
+  }
+
+  return 0;
+}
+
+int utilization_test(task_t **tasks, uint8_t num_tasks) {
+  int i = 0;
+  double utilization_sum = 0;
+  for (; i < num_tasks; i++) {
+    utilization_sum += tasks[i]->comp_time / tasks[i]->period;
+  }
+
+  if (utilization_sum > 1) return 1;
+  return 0;
+}
+
+int edf(task_t **tasks, uint8_t num_tasks, task_t ***schedule,
+        uint32_t *schedule_len) {
+  if (utilization_test(tasks, num_tasks) == 1) return 1;
+
+  current_task_state_t task_state[num_tasks];
+  int i = 0;
+  *schedule_len = find_lcm(tasks, num_tasks);
+  schedule[0] = malloc(sizeof(task_t *) * (*schedule_len));
+
+  for (; i < (*schedule_len); i++) {
+    int j = 0;
+    int highest_schedulable_priority = -1;
+    task_t *highest_priority_task = NULL;
+    int task_index = -1;
+
+    for (; j < num_tasks; j++) {
+      // check if new period to reset comp time
+      if (i % tasks[j]->period == 0) {
+        task_state[j].comp_time_left = tasks[j]->comp_time;
+        task_state[j].priority = tasks[j]->period + i;
+      }
+
+      // find highest priority task that still has comp time
+      if ((task_state[j].priority < highest_schedulable_priority ||
+           highest_schedulable_priority == -1) &&
+          task_state[j].comp_time_left > 0) {
+        highest_schedulable_priority = task_state[j].priority;
+        highest_priority_task = tasks[j];
+        task_index = j;
+      }
+    }
+
+    schedule[0][i] = highest_priority_task;
+    if (task_index != -1) task_state[task_index].comp_time_left--;
+  }
+  return 0;
+}
+
+int llf(task_t **tasks, uint8_t num_tasks, task_t ***schedule,
+        uint32_t *schedule_len) {
+  if (utilization_test(tasks, num_tasks) == 1) return 1;
+
+  current_task_state_t task_state[num_tasks];
+  int next_deadline[num_tasks];
+  int i = 0;
+  *schedule_len = find_lcm(tasks, num_tasks);
+  schedule[0] = malloc(sizeof(task_t *) * (*schedule_len));
+
+  for (; i < (*schedule_len); i++) {
+    int j = 0;
+    int highest_schedulable_priority = -1;
+    task_t *highest_priority_task = NULL;
+    int task_index = -1;
+
+    for (; j < num_tasks; j++) {
+      task_state[j].priority =
+          next_deadline[j] - (i + task_state[j].comp_time_left);
+      // check if new period to reset comp time
+      if (i % tasks[j]->period == 0) {
+        task_state[j].comp_time_left = tasks[j]->comp_time;
+        next_deadline[j] = tasks[j]->period + i;
+      }
+
+      // find highest priority task that still has comp time
+      if ((task_state[j].priority < highest_schedulable_priority ||
+           highest_schedulable_priority == -1) &&
+          task_state[j].comp_time_left > 0) {
+        highest_schedulable_priority = task_state[j].priority;
+        highest_priority_task = tasks[j];
+        task_index = j;
+      }
+    }
+
+    schedule[0][i] = highest_priority_task;
+    if (task_index != -1) task_state[task_index].comp_time_left--;
+  }
+  return 0;
 }
