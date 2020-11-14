@@ -15,6 +15,8 @@ typedef struct task {
 
 int parse_tasks(char *t, task_t ***tasks, uint8_t *num_tasks);
 
+void print_usage();
+
 int p_comparator(const void *p, const void *q);
 
 int d_comparator(const void *p, const void *q);
