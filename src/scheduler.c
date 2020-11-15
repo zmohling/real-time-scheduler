@@ -92,15 +92,16 @@ int main(int argc, char **argv) {
   task_t **schedule = NULL;
   uint32_t schedule_len = 0;
 
+  int unschedulable = 0;
   char *a = strupper(algorithm);
   if (strcmp(a, "RMS") == 0) {
-    ms(tasks, num_tasks, &schedule, &schedule_len, 0);
+    unschedulable = ms(tasks, num_tasks, &schedule, &schedule_len, 0);
   } else if (strcmp(a, "LLF") == 0) {
-    llf(tasks, num_tasks, &schedule, &schedule_len);
+    unschedulable = llf(tasks, num_tasks, &schedule, &schedule_len);
   } else if (strcmp(a, "EDF") == 0) {
-    edf(tasks, num_tasks, &schedule, &schedule_len);
+    unschedulable = edf(tasks, num_tasks, &schedule, &schedule_len);
   } else if (strcmp(a, "DMS") == 0) {
-    ms(tasks, num_tasks, &schedule, &schedule_len, 1);
+    unschedulable = ms(tasks, num_tasks, &schedule, &schedule_len, 1);
   } else {
     printf("%s algorithm unrecognized\n", a);
     print_usage();
@@ -110,8 +111,13 @@ int main(int argc, char **argv) {
   if (output_file_path != NULL) {
     output_file = fopen(output_file_path, "w+");
   }
-
   FILE *out_file = (output_file_path) ? output_file : stdout;
+
+  if (unschedulable) {
+    fprintf(out_file, "Not schedulable\n");
+    exit(0);
+  }
+
   for (int i = 0; i < schedule_len; i++) {
     if (schedule[i]) {
       fprintf(out_file, "%.2d: Task %d\n", i + 1, schedule[i]->id);
